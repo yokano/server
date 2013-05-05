@@ -9,7 +9,6 @@ import(
 	"fmt"
 	"encoding/xml"
 	"encoding/json"
-	"log"
 )
 
 /**
@@ -37,7 +36,6 @@ type Backlog struct {
  * @returns {*Backlog} Backlogオブジェクト
  */
 func newBacklog(c appengine.Context, space string, id string, pass string, request *http.Request) *Backlog {
-	log.Println("newBacklog")
 	var backlog = new(Backlog)
 	backlog.context = c
 	backlog.space = space
@@ -88,7 +86,6 @@ func (this *Backlog) exec(method string) interface{} {
 	}
 	
 	var result []map[string]string
-	log.Println("method check")
 	switch method {
 	case "get_projects":
 		result = this.getProjects()
@@ -100,8 +97,9 @@ func (this *Backlog) exec(method string) interface{} {
 		result = this.getComponents()
 	case "get_statuses":
 		result = this.getStatuses()
+	case "get_users":
+		result = this.getUsers()
 	default:
-		log.Println("default")
 		return nil
 	}
 
@@ -606,6 +604,78 @@ func (this *Backlog) getStatuses() []map[string]string {
 	var i, j int
 	var value Value
 	var member Member
+	for i = 0; i < len(methodResponse.Values); i++ {
+		value = methodResponse.Values[i]
+		result[i] = make(map[string]string, 2)
+		for j = 0; j < len(value.Members); j++ {
+			member = value.Members[j]
+			switch member.Name {
+			case "id":
+				result[i]["id"] = member.Value.I4
+			case "name":
+				result[i]["name"] = member.Value.Chardata
+			}
+		}
+	}
+	
+	return result
+}
+
+/**
+ * ユーザ一覧の取得
+ * @method
+ * @memberof Backlog
+ */
+func (this *Backlog) getUsers() []map[string]string {
+	var projectId string
+	projectId = this.request.FormValue("project")
+	
+	var requestXML string
+	requestXML = `
+		<?xml version="1.0" encoding="utf-8"?>
+		<methodCall>
+		  <methodName>backlog.getUsers</methodName>
+		  <params>
+			<param>
+			  <value>
+				<int>[PROJECT_ID]</int>
+			  </value>
+			</param>
+		  </params>
+		</methodCall>
+	`
+	requestXML = strings.Replace(requestXML, "[PROJECT_ID]", projectId, 1)
+	requestXML = this.serialize(requestXML)
+	
+	var responseXML []byte
+	responseXML = this.sendXML([]byte(requestXML))
+	
+	type SubValue struct {
+		Chardata string `xml:",chardata"`
+		I4 string `xml:"i4"`
+	}
+	type Member struct {
+		Name string `xml:"name"`
+		Value SubValue `xml:"value"`
+	}
+	type Value struct {
+		Members []Member `xml:"struct>member"`
+	}
+	type MethodResponse struct {
+		Values []Value `xml:"params>param>value>array>data>value"`
+	}
+	
+	var methodResponse *MethodResponse
+	methodResponse = new(MethodResponse)
+	var err error
+	err = xml.Unmarshal(responseXML, methodResponse)
+	check(this.context, err)
+	
+	var i, j int
+	var value Value
+	var member Member
+	var result []map[string]string
+	result = make([]map[string]string, len(methodResponse.Values))
 	for i = 0; i < len(methodResponse.Values); i++ {
 		value = methodResponse.Values[i]
 		result[i] = make(map[string]string, 2)
