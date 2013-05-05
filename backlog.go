@@ -98,6 +98,8 @@ func (this *Backlog) exec(method string) interface{} {
 		result = this.getIssueTypes()
 	case "get_components":
 		result = this.getComponents()
+	case "get_statuses":
+		result = this.getStatuses()
 	default:
 		log.Println("default")
 		return nil
@@ -203,8 +205,7 @@ func (this *Backlog) getProjects() []map[string]string {
 			<params />
 		</methodCall>
 	`
-	requestXML = strings.Replace(requestXML, "\n", "", -1)
-	requestXML = strings.Replace(requestXML, "\t", "", -1)
+	requestXML = this.serialize(requestXML)
 	
 	// XMLの送信と受信
 	var responseXML []byte
@@ -305,8 +306,7 @@ func (this *Backlog) findIssue() []map[string]string {
 		</methodCall>
 	`
 	requestXML = strings.Replace(requestXML, "[PROJECT_ID]", projectId, 1)
-	requestXML = strings.Replace(requestXML, "\n", "", -1)
-	requestXML = strings.Replace(requestXML, "\t", "", -1)
+	requestXML = this.serialize(requestXML)
 	
 
 	// XMLの送信と受信
@@ -440,8 +440,7 @@ func (this *Backlog) getIssueTypes() []map[string]string {
 		</methodCall>
 	`
 	requestXML = strings.Replace(requestXML, "[PROJECT_ID]", projectId, 1)
-	requestXML = strings.Replace(requestXML, "\n", "", -1)
-	requestXML = strings.Replace(requestXML, "\t", "", -1)
+	requestXML = this.serialize(requestXML)
 	
 	// XMLの送信と受信
 	var responseXML []byte
@@ -513,8 +512,7 @@ func (this *Backlog) getComponents() []map[string]string {
 	</methodCall>
 	`
 	requestXML = strings.Replace(requestXML, "[PROJECT_ID]", projectId, 1)
-	requestXML = strings.Replace(requestXML, "\n", "", -1)
-	requestXML = strings.Replace(requestXML, "\t", "", -1)
+	requestXML = this.serialize(requestXML)
 
 	var responseXML []byte
 	responseXML = this.sendXML([]byte(requestXML));
@@ -560,4 +558,78 @@ func (this *Backlog) getComponents() []map[string]string {
 	}
 	
 	return result
+}
+
+/**
+ * 状態の取得
+ * @method
+ * @memberof Backlog
+ * @returns {[]map[string]string} 状態リスト
+ */
+func (this *Backlog) getStatuses() []map[string]string {
+	var requestXML string
+	requestXML = `
+		<?xml version="1.0" encoding="utf-8"?>
+		<methodCall>
+		  <methodName>backlog.getStatuses</methodName>
+		  <params />
+		</methodCall>
+	`
+	requestXML = this.serialize(requestXML)
+	
+	var responseXML []byte
+	responseXML = this.sendXML([]byte(requestXML))
+	
+	type SubValue struct {
+		Chardata string `xml:",chardata"`
+		I4 string `xml:"i4"`
+	}
+	type Member struct {
+		Name string `xml:"name"`
+		Value SubValue `xml:"value"`
+	}
+	type Value struct {
+		Members []Member `xml:"struct>member"`
+	}
+	type MethodResponse struct {
+		Values []Value `xml:"params>param>value>array>data>value"`
+	}
+	
+	var err error
+	var methodResponse *MethodResponse
+	methodResponse = new(MethodResponse)	
+	err = xml.Unmarshal(responseXML, methodResponse)
+	check(this.context, err)
+	
+	var result []map[string]string
+	result = make([]map[string]string, len(methodResponse.Values))
+	var i, j int
+	var value Value
+	var member Member
+	for i = 0; i < len(methodResponse.Values); i++ {
+		value = methodResponse.Values[i]
+		result[i] = make(map[string]string, 2)
+		for j = 0; j < len(value.Members); j++ {
+			member = value.Members[j]
+			switch member.Name {
+			case "id":
+				result[i]["id"] = member.Value.I4
+			case "name":
+				result[i]["name"] = member.Value.Chardata
+			}
+		}
+	}
+	
+	return result
+}
+
+/**
+ * 文字列の改行とタブを削除する
+ * @param {string} str 変換する文字列
+ * @param {string} 直列化された文字列
+ */
+func (this *Backlog) serialize(str string) string {
+	str = strings.Replace(str, "\n", "", -1)
+	str = strings.Replace(str, "\t", "", -1)
+	return str
 }
