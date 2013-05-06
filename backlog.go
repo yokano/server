@@ -109,37 +109,54 @@ func (this *Backlog) exec(method string) interface{} {
 /**
  * XML を backlog のサーバへ渡すための Reader
  * @class
+ * @extends io.Reader
+ * @property {[]byte} data xmlのバイト配列
+ * @property {int} pointer 何バイト目まで読み込んだかを表す数値
  */
 type XMLReader struct {
 	io.Reader
 	data []byte
+	pointer int
+}
+
+/**
+ * XMLReader を作成して返す
+ * @function
+ * @param {[]byte} xml
+ * @returns {*XMLReader} 作成したXMLReader
+ */
+func NewXMLReader(data []byte) *XMLReader {
+	var xmlReader *XMLReader
+	xmlReader = new(XMLReader)
+	xmlReader.pointer = 0
+	xmlReader.data = data
+	return xmlReader
 }
 
 /**
  * xml を読み込む
  * @method
  * @memberof XMLReader
+ * @param {[]byte} p 読み込んだバイトを格納する変数
+ * @returns {int} 読み込んだバイト数
+ * @returns {error} 最後まで読み込んだらio.EOF、それ以外はnil
  */
 func (this *XMLReader) Read(p []byte) (int, error) {
 	var i int
-	var n int
 	var err error
 	
-	for i = 0; i < len(p) - 1; i++ {
-		if i > len(this.data) - 1 {
-			break
-		}
-		p[i] = this.data[i]
+	for i = 0; i < len(p) && i + this.pointer < len(this.data); i++ {
+		p[i] = this.data[i + this.pointer]
 	}
 	
-	if i == len(p) - 1 {
-		n = len(p)
-		err = nil
-	} else {
-		n = len(this.data)
+	if i + this.pointer == len(this.data) {
 		err = io.EOF
+	} else {
+		err = nil
 	}
-	return n, err
+	this.pointer = i + this.pointer
+	
+	return i, err
 }
 
 /**
@@ -158,8 +175,7 @@ func (this *Backlog) sendXML(xml []byte) []byte {
 	
 	// リクエストXMLを作成
 	var xmlReader *XMLReader
-	xmlReader = new(XMLReader)
-	xmlReader.data = xml
+	xmlReader = NewXMLReader(xml)
 	
 	// HTTPリクエスト作成
 	var client *http.Client
@@ -262,9 +278,20 @@ func (this *Backlog) getProjects() []map[string]string {
  * @returns {[]map[string]string} タスクリスト
  */
 func (this *Backlog) findIssue() []map[string]string {
-	var projectId string
+	var i, j int
 	var err error
+
+	var projectId string
+	var issueType string
+	var component string
+	var status string
+	var assigner string
+
 	projectId = this.request.FormValue("project")
+	issueType = this.request.FormValue("issue_type")
+	component = this.request.FormValue("component")
+	status = this.request.FormValue("status")
+	assigner = this.request.FormValue("assigner")
 	
 	// XMLの作成
 	var requestXML string
@@ -282,27 +309,102 @@ func (this *Backlog) findIssue() []map[string]string {
 									<int>[PROJECT_ID]</int>
 								</value>
 							</member>
-							<member>
-								<name>statusId</name>
-								<value>
-									<array>
-										<data>
-											<value>
-												<int>1</int>
-											</value>
-											<value>
-												<int>2</int>
-											</value>
-										</data>
-									</array>
-								</value>
-							</member>
+							[ISSUE_TYPE]
+							[COMPONENT]
+							[STATUS]
+							[ASSIGNER]
 						</struct>
 					</value>
 				</param>
 			</params>
 		</methodCall>
 	`
+	// 条件指定
+	var conditionBase string
+	conditionBase = `
+		<member>
+			<name>[CONDITION_NAME]</name>
+			<value>
+				<array>
+					<data>
+						[VALUES]
+					</data>
+				</array>
+			</value>
+		</member>
+	`
+	
+	var valueBase string
+	valueBase = `
+		<value>
+			<int>[ID]</int>
+		</value>
+	`
+	
+	var conditionIDs []string
+	var conditionValues string
+	var conditionMember string
+	
+	// 種別
+	if issueType != "" {
+		conditionValues = ""
+		conditionMember = ""
+		conditionIDs = strings.Split(issueType, ",")
+		for i = 0; i < len(conditionIDs); i++ {
+			conditionValues = strings.Join([]string{conditionValues, strings.Replace(valueBase, "[ID]", conditionIDs[i], 1)}, "")
+		}
+		conditionMember = strings.Replace(conditionBase, "[VALUES]", conditionValues, 1)
+		conditionMember = strings.Replace(conditionMember, "[CONDITION_NAME]", "issueType", 1)
+		requestXML = strings.Replace(requestXML, "[ISSUE_TYPE]", conditionMember, 1)
+	} else {
+		requestXML = strings.Replace(requestXML, "[ISSUE_TYPE]", "", 1)
+	}
+	
+	// カテゴリ
+	if component != "" {
+		conditionValues = ""
+		conditionMember = ""
+		conditionIDs = strings.Split(component, ",")
+		for i = 0; i < len(conditionIDs); i++ {
+			conditionValues = strings.Join([]string{conditionValues, strings.Replace(valueBase, "[ID]", conditionIDs[i], 1)}, "")
+		}
+		conditionMember = strings.Replace(conditionBase, "[VALUES]", conditionValues, 1)
+		conditionMember = strings.Replace(conditionMember, "[CONDITION_NAME]", "componentId", 1)
+		requestXML = strings.Replace(requestXML, "[COMPONENT]", conditionMember, 1)
+	} else {
+		requestXML = strings.Replace(requestXML, "[COMPONENT]", "", 1)
+	}
+	
+	// 状態
+	if status != "" {
+		conditionValues = ""
+		conditionMember = ""
+		conditionIDs = strings.Split(status, ",")
+		for i = 0; i < len(conditionIDs); i++ {
+			conditionValues = strings.Join([]string{conditionValues, strings.Replace(valueBase, "[ID]", conditionIDs[i], 1)}, "")
+		}
+		conditionMember = strings.Replace(conditionBase, "[VALUES]", conditionValues, 1)
+		conditionMember = strings.Replace(conditionMember, "[CONDITION_NAME]", "statusId", 1)
+		requestXML = strings.Replace(requestXML, "[STATUS]", conditionMember, 1)
+	} else {
+		requestXML = strings.Replace(requestXML, "[STATUS]", "", 1)
+	}
+
+	// 担当者
+	if assigner != "" {
+		conditionValues = ""
+		conditionMember = ""
+		conditionIDs = strings.Split(assigner, ",")
+		for i = 0; i < len(conditionIDs); i++ {
+			conditionValues = strings.Join([]string{conditionValues, strings.Replace(valueBase, "[ID]", conditionIDs[i], 1)}, "")
+		}
+		conditionMember = strings.Replace(conditionBase, "[VALUES]", conditionValues, 1)
+		conditionMember = strings.Replace(conditionMember, "[CONDITION_NAME]", "assignerId", 1)
+		requestXML = strings.Replace(requestXML, "[ASSIGNER]", conditionMember, 1)
+	} else {
+		requestXML = strings.Replace(requestXML, "[ASSIGNER]", "", 1)
+	}
+	
 	requestXML = strings.Replace(requestXML, "[PROJECT_ID]", projectId, 1)
 	requestXML = this.serialize(requestXML)
 	
@@ -347,8 +449,6 @@ func (this *Backlog) findIssue() []map[string]string {
 	check(this.context, err)
 	
 	// 解析したXMLから必要なデータを抽出する
-	var i int
-	var j int
 	var structXML StructXML
 	var memberXML MemberXML
 	var result []map[string]string

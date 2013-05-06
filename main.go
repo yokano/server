@@ -7,12 +7,9 @@ import(
 	"appengine/datastore"
 	"encoding/json"
 	"fmt"
-	"log"
 )
 
 func init() {
-	log.Println("init")
-	
 	// ランキング
 	http.HandleFunc("/getranking", getRanking)
 	http.HandleFunc("/putranking", putRanking)
